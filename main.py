@@ -7,7 +7,7 @@ from agent.config import Config
 from agent.llm import LLMClient
 from agent.loop import AgentLoop
 from agent.tools import ToolRegistry
-from agent.tools.fs import ReadFileTool, WriteFileTool
+from agent.tools.fs import EditFileTool, ListFilesTool, ReadFileTool, SearchTool, WriteFileTool
 from agent.tools.shell import RunCommandTool
 
 
@@ -16,6 +16,9 @@ def build_agent(cfg: Config) -> AgentLoop:
     registry = ToolRegistry()
     registry.register(ReadFileTool(cfg.workdir))
     registry.register(WriteFileTool(cfg.workdir))
+    registry.register(EditFileTool(cfg.workdir))
+    registry.register(ListFilesTool(cfg.workdir))
+    registry.register(SearchTool(cfg.workdir))
     registry.register(RunCommandTool(cfg.workdir))
 
     llm = LLMClient(cfg.api_key, cfg.base_url, cfg.model, cfg.temperature, cfg.max_retries)
