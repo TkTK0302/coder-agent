@@ -16,6 +16,7 @@ venv/
 # agent 的工作目录（运行时产生的临时文件）
 workdir/
 *.log
+*.jsonl
 
 # 系统
 .DS_Store

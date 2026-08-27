@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from agent.context import ContextManager
 from agent.llm import LLMClient
 from agent.tools import ToolRegistry
+from agent.trace import Tracer
 
 
 SYSTEM_PROMPT = (
@@ -57,6 +58,7 @@ class AgentLoop:
         token_budget: int = 64_000,
         keep_recent: int = 6,
         stuck_threshold: int = 4,
+        tracer: Tracer | None = None,
     ):
         self.llm = llm
         self.registry = registry
@@ -64,10 +66,13 @@ class AgentLoop:
         self.token_budget = token_budget
         self.keep_recent = keep_recent
         self.stuck_threshold = stuck_threshold
+        self.tracer = tracer
 
     def run(self, task: str) -> RunOutcome:
         ctx = ContextManager(SYSTEM_PROMPT, self.token_budget, self.llm, self.keep_recent)
         ctx.add({"role": "user", "content": task})
+        if self.tracer:
+            self.tracer.start(task)
 
         prev_signature: tuple | None = None
         stuck_count = 0
@@ -76,8 +81,13 @@ class AgentLoop:
             ctx.trim_if_needed()
             msg = self.llm.chat(ctx.messages, tools=self.registry.specs())
             ctx.add(_assistant_message(msg))
+            if self.tracer:
+                self.tracer.iteration(i + 1)
+                self.tracer.model(msg.content, msg.tool_calls)
 
             if not msg.tool_calls:
+                if self.tracer:
+                    self.tracer.done("completed", i + 1)
                 return RunOutcome(
                     final_message=msg.content or "(无文字说明)",
                     iterations=i + 1,
@@ -89,6 +99,8 @@ class AgentLoop:
             stuck_count = stuck_count + 1 if signature == prev_signature else 1
             prev_signature = signature
             if stuck_count >= self.stuck_threshold:
+                if self.tracer:
+                    self.tracer.done("stuck", i + 1)
                 return RunOutcome(
                     final_message=(
                         f"检测到连续 {self.stuck_threshold} 次重复的工具调用，疑似陷入死循环，已停止。"
@@ -99,8 +111,12 @@ class AgentLoop:
 
             for tc in msg.tool_calls:
                 result = self.registry.execute(tc.function.name, tc.function.arguments)
+                if self.tracer:
+                    self.tracer.tool(tc.function.name, tc.function.arguments, result)
                 ctx.add({"role": "tool", "tool_call_id": tc.id, "content": result.to_content()})
 
+        if self.tracer:
+            self.tracer.done("max_iters", self.max_iters)
         return RunOutcome(
             final_message="达到最大迭代次数，任务可能未完成。",
             iterations=self.max_iters,
