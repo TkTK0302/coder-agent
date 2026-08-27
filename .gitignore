@@ -1,0 +1,22 @@
+# 凭据：绝不允许入库
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 测试与缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# agent 的工作目录（运行时产生的临时文件）
+workdir/
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
