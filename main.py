@@ -22,7 +22,7 @@ def build_agent(cfg: Config) -> AgentLoop:
     registry.register(RunCommandTool(cfg.workdir))
 
     llm = LLMClient(cfg.api_key, cfg.base_url, cfg.model, cfg.temperature, cfg.max_retries)
-    return AgentLoop(llm, registry, cfg.max_iters)
+    return AgentLoop(llm, registry, cfg.max_iters, token_budget=cfg.max_token_budget)
 
 
 def main() -> None:

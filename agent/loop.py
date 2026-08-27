@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agent.context import ContextManager
 from agent.llm import LLMClient
 from agent.tools import ToolRegistry
 
@@ -41,19 +42,28 @@ class RunOutcome:
 class AgentLoop:
     """The core observe -> decide -> act loop."""
 
-    def __init__(self, llm: LLMClient, registry: ToolRegistry, max_iters: int = 30):
+    def __init__(
+        self,
+        llm: LLMClient,
+        registry: ToolRegistry,
+        max_iters: int = 30,
+        token_budget: int = 64_000,
+        keep_recent: int = 6,
+    ):
         self.llm = llm
         self.registry = registry
         self.max_iters = max_iters
+        self.token_budget = token_budget
+        self.keep_recent = keep_recent
 
     def run(self, task: str) -> RunOutcome:
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": task},
-        ]
+        ctx = ContextManager(SYSTEM_PROMPT, self.token_budget, self.llm, self.keep_recent)
+        ctx.add({"role": "user", "content": task})
+
         for i in range(self.max_iters):
-            msg = self.llm.chat(messages, tools=self.registry.specs())
-            messages.append(_assistant_message(msg))
+            ctx.trim_if_needed()
+            msg = self.llm.chat(ctx.messages, tools=self.registry.specs())
+            ctx.add(_assistant_message(msg))
 
             if not msg.tool_calls:
                 return RunOutcome(
@@ -64,9 +74,7 @@ class AgentLoop:
 
             for tc in msg.tool_calls:
                 result = self.registry.execute(tc.function.name, tc.function.arguments)
-                messages.append(
-                    {"role": "tool", "tool_call_id": tc.id, "content": result.to_content()}
-                )
+                ctx.add({"role": "tool", "tool_call_id": tc.id, "content": result.to_content()})
 
         return RunOutcome(
             final_message="达到最大迭代次数，任务可能未完成。",
