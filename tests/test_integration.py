@@ -12,9 +12,11 @@ import pytest
 from agent.config import Config, _load_dotenv
 from agent.llm import LLMClient
 from agent.loop import AgentLoop
+from agent.planner import Planner
 from agent.tools import ToolRegistry
 from agent.tools.fs import EditFileTool, ListFilesTool, ReadFileTool, SearchTool, WriteFileTool
 from agent.tools.shell import RunCommandTool
+from agent.verifier import Verifier
 
 
 # 让集成测试在 .env 已配置时也能运行（无需额外设置环境变量）
@@ -38,7 +40,14 @@ def _build_agent(workdir):
     ):
         reg.register(t)
     llm = LLMClient(cfg.api_key, cfg.base_url, cfg.model, cfg.temperature, cfg.max_retries)
-    return AgentLoop(llm, reg, cfg.max_iters, token_budget=cfg.max_token_budget)
+    return AgentLoop(
+        llm,
+        reg,
+        cfg.max_iters,
+        token_budget=cfg.max_token_budget,
+        planner=Planner(llm),
+        verifier=Verifier(workdir),
+    )
 
 
 def test_real_end_to_end(tmp_path):

@@ -38,6 +38,14 @@ class Tracer:
         self._emit({"type": "run_start", "task": task})
         self._print(f"任务: {task}")
 
+    def plan(self, plan_text: str) -> None:
+        self._emit({"type": "plan", "plan": plan_text})
+        self._print(f"\n[计划]\n{plan_text}")
+
+    def verify(self, ok: bool, detail: str) -> None:
+        self._emit({"type": "verify", "ok": ok, "detail": detail})
+        self._print(f"\n[验证] {'通过' if ok else '未通过'}: {detail}")
+
     def iteration(self, n: int) -> None:
         self._emit({"type": "iteration", "n": n})
         self._print(f"\n───── 第 {n} 轮 ─────")

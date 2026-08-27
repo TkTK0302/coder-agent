@@ -4,8 +4,10 @@ from dataclasses import dataclass
 
 from agent.context import ContextManager
 from agent.llm import LLMClient
+from agent.planner import Planner
 from agent.tools import ToolRegistry
 from agent.trace import Tracer
+from agent.verifier import Verifier
 
 
 SYSTEM_PROMPT = (
@@ -43,10 +45,13 @@ class RunOutcome:
 class AgentLoop:
     """The core observe -> decide -> act loop.
 
+    Flow: plan -> (observe -> decide -> act)* -> verify -> done.
+
     Termination is multi-condition (a single condition would either loop forever
     or stop too early):
       1. max_iters — a hard safety cap on the number of turns;
-      2. finish_reason=stop with no tool_calls — the model signals it is done;
+      2. finish_reason=stop with no tool_calls — the model signals it is done
+         (then verified by the Verifier);
       3. stuck detection — the identical tool-call batch repeated too many times.
     """
 
@@ -59,6 +64,9 @@ class AgentLoop:
         keep_recent: int = 6,
         stuck_threshold: int = 4,
         tracer: Tracer | None = None,
+        planner: Planner | None = None,
+        verifier: Verifier | None = None,
+        max_verify_attempts: int = 3,
     ):
         self.llm = llm
         self.registry = registry
@@ -67,6 +75,9 @@ class AgentLoop:
         self.keep_recent = keep_recent
         self.stuck_threshold = stuck_threshold
         self.tracer = tracer
+        self.planner = planner
+        self.verifier = verifier
+        self.max_verify_attempts = max_verify_attempts
 
     def run(self, task: str) -> RunOutcome:
         ctx = ContextManager(SYSTEM_PROMPT, self.token_budget, self.llm, self.keep_recent)
@@ -74,8 +85,17 @@ class AgentLoop:
         if self.tracer:
             self.tracer.start(task)
 
+        # Plan-then-execute: produce a short plan before acting.
+        if self.planner is not None:
+            plan = self.planner.plan(task)
+            if plan:
+                ctx.add({"role": "assistant", "content": f"计划：\n{plan}"})
+                if self.tracer:
+                    self.tracer.plan(plan)
+
         prev_signature: tuple | None = None
         stuck_count = 0
+        verify_attempts = 0
 
         for i in range(self.max_iters):
             ctx.trim_if_needed()
@@ -86,6 +106,15 @@ class AgentLoop:
                 self.tracer.model(msg.content, msg.tool_calls)
 
             if not msg.tool_calls:
+                # Verify-before-done: don't trust the "done" claim blindly.
+                if self.verifier is not None and verify_attempts < self.max_verify_attempts:
+                    verify_attempts += 1
+                    ok, detail = self.verifier.verify()
+                    if self.tracer:
+                        self.tracer.verify(ok, detail)
+                    if not ok:
+                        ctx.add({"role": "user", "content": f"验证未通过：\n{detail}\n请修复后重新提交。"})
+                        continue
                 if self.tracer:
                     self.tracer.done("completed", i + 1)
                 return RunOutcome(
