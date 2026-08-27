@@ -1,0 +1,5 @@
+# 统一文本文件行尾，避免跨平台（Windows/Linux）diff 噪音
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
