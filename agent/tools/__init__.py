@@ -69,20 +69,28 @@ class ToolRegistry:
     def execute(self, name: str, raw_args: str | dict) -> ToolResult:
         """Validate raw arguments against the tool's schema, then run it.
 
-        Any failure (bad args or a crashing tool) is converted into an error
-        envelope rather than raising, so the loop can feed it back to the model.
+        Every failure path — unknown tool, malformed JSON, invalid arguments, or a
+        crashing tool — is converted into an error envelope rather than raising, so
+        the loop can feed it back to the model to recover. This method never raises.
         """
-        tool = self.get(name)
-        args_dict = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+        try:
+            tool = self.get(name)
+        except KeyError:
+            return ToolResult.error(f"未知工具: {name}", hint="只调用已提供的工具")
+
+        try:
+            args_dict = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+        except (json.JSONDecodeError, TypeError) as exc:
+            return ToolResult.error(f"工具参数不是合法 JSON: {exc}", hint="以合法 JSON 重试")
+
         try:
             args = tool.args_model.model_validate(args_dict)
         except Exception as exc:
-            return ToolResult.error(
-                f"invalid arguments: {exc}", hint="check the argument schema and retry"
-            )
+            return ToolResult.error(f"参数校验失败: {exc}", hint="检查参数 schema 后重试")
+
         try:
             return tool.run(args)
         except Exception as exc:
             return ToolResult.error(
-                f"tool execution failed: {exc}", hint="inspect the error and recover"
+                f"工具执行失败: {exc}", hint="inspect the error and recover"
             )
