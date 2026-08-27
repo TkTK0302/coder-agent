@@ -52,8 +52,9 @@ class Tool(ABC):
 
 
 class ToolRegistry:
-    def __init__(self) -> None:
+    def __init__(self, safety=None) -> None:
         self._tools: dict[str, Tool] = {}
+        self.safety = safety  # optional SafetyPolicy, checked before each execution
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -87,6 +88,11 @@ class ToolRegistry:
             args = tool.args_model.model_validate(args_dict)
         except Exception as exc:
             return ToolResult.error(f"参数校验失败: {exc}", hint="检查参数 schema 后重试")
+
+        if self.safety is not None:
+            allowed, reason = self.safety.check(tool, args_dict)
+            if not allowed:
+                return ToolResult.error(f"操作被安全策略拦截: {reason}", hint="改用更安全的做法")
 
         try:
             return tool.run(args)
