@@ -8,9 +8,10 @@ from agent.llm import LLMClient
 from agent.loop import AgentLoop
 from agent.planner import Planner
 from agent.safety import SafetyPolicy
+from agent.sandbox import create_sandbox
 from agent.tools import ToolRegistry
 from agent.tools.fs import EditFileTool, ListFilesTool, ReadFileTool, SearchTool, WriteFileTool
-from agent.tools.shell import RunCommandTool
+from agent.tools.shell import CheckCommandTool, RunCommandTool, StartCommandTool, StopCommandTool
 from agent.trace import Tracer
 from agent.verifier import Verifier
 
@@ -33,18 +34,24 @@ def build_agent(
     # auto-denied in one-shot mode. --allow-dangerous bypasses it entirely.
     safety = None if allow_dangerous else SafetyPolicy(confirmer=_confirm if interactive else None)
 
+    # 执行环境：host 直接执行（兜底），docker 走容器隔离
+    sandbox = create_sandbox(cfg.sandbox_mode, cfg.workdir, cfg.docker_image)
+
     registry = ToolRegistry(safety=safety)
     registry.register(ReadFileTool(cfg.workdir))
     registry.register(WriteFileTool(cfg.workdir))
     registry.register(EditFileTool(cfg.workdir))
     registry.register(ListFilesTool(cfg.workdir))
     registry.register(SearchTool(cfg.workdir))
-    registry.register(RunCommandTool(cfg.workdir))
+    registry.register(RunCommandTool(sandbox))
+    registry.register(StartCommandTool(sandbox))
+    registry.register(CheckCommandTool(sandbox))
+    registry.register(StopCommandTool(sandbox))
 
     llm = LLMClient(cfg.api_key, cfg.base_url, cfg.model, cfg.temperature, cfg.max_retries)
     planner = Planner(llm) if plan else None
     verifier = Verifier(cfg.workdir) if verify else None
-    return AgentLoop(
+    agent = AgentLoop(
         llm,
         registry,
         cfg.max_iters,
@@ -53,6 +60,8 @@ def build_agent(
         planner=planner,
         verifier=verifier,
     )
+    agent.sandbox = sandbox  # 供 main() 清理（如删除 Docker 容器）
+    return agent
 
 
 def main() -> None:
@@ -98,6 +107,7 @@ def main() -> None:
                 print(outcome.final_message)
     finally:
         tracer.close()
+        agent.sandbox.close()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 from agent.loop import AgentLoop
+from agent.sandbox import HostSandbox
 from agent.tools import ToolRegistry
 from agent.tools.fs import EditFileTool, ListFilesTool, ReadFileTool, SearchTool, WriteFileTool
 from agent.tools.shell import RunCommandTool
@@ -12,7 +13,7 @@ def make_registry(workdir):
         EditFileTool(workdir),
         ListFilesTool(workdir),
         SearchTool(workdir),
-        RunCommandTool(workdir),
+        RunCommandTool(HostSandbox(workdir)),
     ):
         reg.register(t)
     return reg

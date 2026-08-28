@@ -13,6 +13,7 @@ from agent.config import Config, _load_dotenv
 from agent.llm import LLMClient
 from agent.loop import AgentLoop
 from agent.planner import Planner
+from agent.sandbox import HostSandbox
 from agent.tools import ToolRegistry
 from agent.tools.fs import EditFileTool, ListFilesTool, ReadFileTool, SearchTool, WriteFileTool
 from agent.tools.shell import RunCommandTool
@@ -36,7 +37,7 @@ def _build_agent(workdir):
         EditFileTool(workdir),
         ListFilesTool(workdir),
         SearchTool(workdir),
-        RunCommandTool(workdir),
+        RunCommandTool(HostSandbox(workdir)),
     ):
         reg.register(t)
     llm = LLMClient(cfg.api_key, cfg.base_url, cfg.model, cfg.temperature, cfg.max_retries)

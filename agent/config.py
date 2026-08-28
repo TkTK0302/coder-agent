@@ -32,6 +32,8 @@ class Config:
     max_retries: int = 3
     max_token_budget: int = 64_000
     workdir: Path = field(default_factory=Path.cwd)
+    sandbox_mode: str = "host"  # host | docker
+    docker_image: str = "python:3.12-slim"
 
     @classmethod
     def from_env(cls, workdir: Path | None = None) -> "Config":
@@ -49,4 +51,6 @@ class Config:
             max_retries=int(os.environ.get("AGENT_MAX_RETRIES", "3")),
             max_token_budget=int(os.environ.get("AGENT_TOKEN_BUDGET", "64000")),
             workdir=workdir or Path.cwd(),
+            sandbox_mode=os.environ.get("AGENT_SANDBOX", "host"),
+            docker_image=os.environ.get("DOCKER_IMAGE", "python:3.12-slim"),
         )

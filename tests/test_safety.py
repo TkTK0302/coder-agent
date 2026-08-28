@@ -1,6 +1,7 @@
 import pytest
 
 from agent.safety import SafetyPolicy
+from agent.sandbox import HostSandbox
 from agent.tools.fs import ReadFileTool, WriteFileTool
 from agent.tools.shell import RunCommandTool
 
@@ -25,17 +26,17 @@ def test_graded_levels(tmp_path):
     sp = SafetyPolicy()
     assert sp.check(ReadFileTool(tmp_path), {"path": "x"})[0] is True
     assert sp.check(WriteFileTool(tmp_path), {"path": "x", "content": "1"})[0] is True
-    allowed, _ = sp.check(RunCommandTool(tmp_path), {"command": "rm -rf /"})
+    allowed, _ = sp.check(RunCommandTool(HostSandbox(tmp_path)), {"command": "rm -rf /"})
     assert allowed is False
 
 
 def test_confirmer_deny(tmp_path):
     sp = SafetyPolicy(confirmer=lambda c: False)
-    allowed, reason = sp.check(RunCommandTool(tmp_path), {"command": "git push"})
+    allowed, reason = sp.check(RunCommandTool(HostSandbox(tmp_path)), {"command": "git push"})
     assert allowed is False
     assert "拒绝" in reason
 
 
 def test_confirmer_allow(tmp_path):
     sp = SafetyPolicy(confirmer=lambda c: True)
-    assert sp.check(RunCommandTool(tmp_path), {"command": "git push"})[0] is True
+    assert sp.check(RunCommandTool(HostSandbox(tmp_path)), {"command": "git push"})[0] is True
