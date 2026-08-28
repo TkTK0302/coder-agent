@@ -63,6 +63,18 @@ def test_stuck_detection(tmp_path):
     assert out.reason == "stuck"
 
 
+def test_semantic_error_loop(tmp_path):
+    # 不同的 old_string 都找不到 → 同样的错误信息反复出现（非字面重复的循环）
+    (tmp_path / "x.py").write_text("hello\n", encoding="utf-8")
+    responses = [
+        make_msg(None, [("edit_file", f'{{"path": "x.py", "old_string": "missing{i}", "new_string": "x"}}')])
+        for i in range(10)
+    ]
+    llm = FakeLLM(responses)
+    out = AgentLoop(llm, make_registry(tmp_path)).run("task")
+    assert out.reason == "stuck"
+
+
 def test_max_iters(tmp_path):
     responses = [make_msg(None, [("run_command", f'{{"command": "echo {i}"}}')]) for i in range(30)]
     llm = FakeLLM(responses)

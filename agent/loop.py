@@ -6,6 +6,7 @@ from agent.context import ContextManager
 from agent.llm import LLMClient
 from agent.memory import MemoryStore
 from agent.planner import Planner
+from agent.todo import TodoList
 from agent.tools import ToolRegistry
 from agent.trace import Tracer
 from agent.verifier import Verifier
@@ -13,11 +14,14 @@ from agent.verifier import Verifier
 
 SYSTEM_PROMPT = (
     "你是一个编程智能体（coding agent），在一个受控的工作目录中帮用户完成编程任务。\n"
-    "你可以调用提供的工具来读写/编辑文件、列出目录、搜索内容、执行命令。\n"
+    "你可以调用提供的工具来读写/编辑文件、列出目录、搜索内容、执行命令、查环境、管理 git、追踪任务进度。\n"
+    "工作方式（ReAct）：每一步先思考(Thought)当前状态与目标，再行动(Action)调用工具，"
+    "根据观察(Observation)结果决定下一步。\n"
     "规则：\n"
     "1. 完成任务后，用自然语言简要说明你做了什么、结果如何，且不要再调用工具。\n"
     "2. 工具报错时，先读错误信息，再决定如何修正，不要盲目重复同样的操作。\n"
     "3. 所有文件操作都在工作目录内进行。\n"
+    "4. 有任务清单时，用 update_todo 及时标记进度。\n"
 )
 
 
@@ -76,6 +80,7 @@ class AgentLoop:
         verifier: Verifier | None = None,
         max_verify_attempts: int = 3,
         memory: MemoryStore | None = None,
+        todo: TodoList | None = None,
     ):
         self.llm = llm
         self.registry = registry
@@ -88,6 +93,7 @@ class AgentLoop:
         self.verifier = verifier
         self.max_verify_attempts = max_verify_attempts
         self.memory = memory
+        self.todo = todo
 
     def run(self, task: str) -> RunOutcome:
         ctx = ContextManager(SYSTEM_PROMPT, self.token_budget, self.llm, self.keep_recent)
@@ -104,17 +110,26 @@ class AgentLoop:
                 if self.tracer:
                     self.tracer.memory(len(relevant))
 
-        # Plan-then-execute: produce a short plan before acting.
+        # Plan-then-execute：产出结构化 todo 清单并注入，供进度追踪。
         if self.planner is not None:
-            plan = self.planner.plan(task)
-            if plan:
-                ctx.add({"role": "assistant", "content": f"计划：\n{plan}"})
-                if self.tracer:
-                    self.tracer.plan(plan)
+            steps = self.planner.plan(task)
+            if steps:
+                if self.todo is not None:
+                    self.todo.reset(steps)
+                    ctx.add({"role": "assistant", "content": self.todo.to_prompt()})
+                    if self.tracer:
+                        self.tracer.plan(self.todo.to_prompt())
+                else:
+                    plan_text = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(steps))
+                    ctx.add({"role": "assistant", "content": f"计划：\n{plan_text}"})
+                    if self.tracer:
+                        self.tracer.plan(plan_text)
 
         prev_signature: tuple | None = None
         stuck_count = 0
         verify_attempts = 0
+        prev_error_sig: str | None = None
+        error_repeat = 0
 
         for i in range(self.max_iters):
             ctx.trim_if_needed()
@@ -157,11 +172,29 @@ class AgentLoop:
                     reason="stuck",
                 )
 
+            results = []
             for tc in msg.tool_calls:
                 result = self.registry.execute(tc.function.name, tc.function.arguments)
+                results.append(result)
                 if self.tracer:
                     self.tracer.tool(tc.function.name, tc.function.arguments, result)
                 ctx.add({"role": "tool", "tool_call_id": tc.id, "content": result.to_content()})
+
+            # 语义级死循环检测：连续多轮出现同样的错误信息（即使工具调用不同），
+            # 捕捉「改代码→报错→撤销→重改→同样报错」这类非字面重复的循环。
+            error_sig = next((r.output[:120] for r in results if r.status == "error"), None)
+            error_repeat = error_repeat + 1 if error_sig is not None and error_sig == prev_error_sig else (1 if error_sig is not None else 0)
+            prev_error_sig = error_sig
+            if error_repeat >= self.stuck_threshold:
+                if self.tracer:
+                    self.tracer.done("stuck", i + 1)
+                return RunOutcome(
+                    final_message=(
+                        f"检测到连续 {self.stuck_threshold} 轮出现同样的错误，疑似陷入「改→错→改→错」死循环，已停止。"
+                    ),
+                    iterations=i + 1,
+                    reason="stuck",
+                )
 
         if self.tracer:
             self.tracer.done("max_iters", self.max_iters)

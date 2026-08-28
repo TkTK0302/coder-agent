@@ -20,13 +20,19 @@ class FailingLLM:
         raise RuntimeError("boom")
 
 
-def test_plan_returns_text():
+def test_plan_parses_json():
+    llm = FakeLLM('["第一步", "第二步", "第三步"]')
+    planner = Planner(llm)
+    assert planner.plan("任务") == ["第一步", "第二步", "第三步"]
+    assert len(llm.calls) == 1
+
+
+def test_plan_falls_back_to_lines():
     llm = FakeLLM("1. 创建文件\n2. 运行验证")
     planner = Planner(llm)
-    assert planner.plan("写个脚本") == "1. 创建文件\n2. 运行验证"
-    assert len(llm.calls) == 1
+    assert planner.plan("任务") == ["创建文件", "运行验证"]
 
 
 def test_plan_failure_returns_empty():
     planner = Planner(FailingLLM())
-    assert planner.plan("写个脚本") == ""
+    assert planner.plan("任务") == []

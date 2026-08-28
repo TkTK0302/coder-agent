@@ -10,10 +10,14 @@ from agent.memory import MemoryStore
 from agent.planner import Planner
 from agent.safety import SafetyPolicy
 from agent.sandbox import create_sandbox
+from agent.todo import TodoList
 from agent.tools import ToolRegistry
-from agent.tools.code import SearchCodeTool
+from agent.tools.code import FindDefinitionTool, ListSymbolsTool, SearchCodeTool
+from agent.tools.env import EnvInfoTool
 from agent.tools.fs import EditFileTool, ListFilesTool, ReadFileTool, SearchTool, WriteFileTool
+from agent.tools.git import GitCommitTool, GitDiffTool, GitLogTool, GitRestoreTool, GitStatusTool
 from agent.tools.shell import CheckCommandTool, RunCommandTool, StartCommandTool, StopCommandTool
+from agent.tools.todo import UpdateTodoTool
 from agent.trace import Tracer
 from agent.verifier import Verifier
 
@@ -51,6 +55,22 @@ def build_agent(
     registry.register(CheckCommandTool(sandbox))
     registry.register(StopCommandTool(sandbox))
 
+    # 环境感知 + Git 版本控制
+    registry.register(EnvInfoTool(sandbox))
+    registry.register(GitStatusTool(sandbox))
+    registry.register(GitDiffTool(sandbox))
+    registry.register(GitLogTool(sandbox))
+    registry.register(GitCommitTool(sandbox))
+    registry.register(GitRestoreTool(sandbox))
+
+    # 代码导航（AST）
+    registry.register(ListSymbolsTool(cfg.workdir))
+    registry.register(FindDefinitionTool(cfg.workdir))
+
+    # 任务清单（进度追踪）
+    todo = TodoList()
+    registry.register(UpdateTodoTool(todo, cfg.workdir))
+
     # 长期记忆（RAG）：可选，任务开始时自动索引并召回相关代码
     memory = MemoryStore(cfg.workdir, cfg.embed_model) if memory_enabled else None
     if memory is not None:
@@ -68,6 +88,7 @@ def build_agent(
         planner=planner,
         verifier=verifier,
         memory=memory,
+        todo=todo,
     )
     agent.sandbox = sandbox  # 供 main() 清理（如删除 Docker 容器）
     return agent
