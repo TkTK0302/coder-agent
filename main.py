@@ -12,6 +12,7 @@ from agent.safety import SafetyPolicy
 from agent.sandbox import create_sandbox
 from agent.todo import TodoList
 from agent.tools import ToolRegistry
+from agent.tools.ask import AskUserTool
 from agent.tools.code import FindDefinitionTool, ListSymbolsTool, SearchCodeTool
 from agent.tools.env import EnvInfoTool
 from agent.tools.fs import EditFileTool, ListFilesTool, ReadFileTool, SearchTool, WriteFileTool
@@ -67,9 +68,10 @@ def build_agent(
     registry.register(ListSymbolsTool(cfg.workdir))
     registry.register(FindDefinitionTool(cfg.workdir))
 
-    # 任务清单（进度追踪）
+    # 任务清单（进度追踪）+ 主动提问（Human-in-the-Loop）
     todo = TodoList()
     registry.register(UpdateTodoTool(todo, cfg.workdir))
+    registry.register(AskUserTool(cfg.workdir, interactive=interactive))
 
     # 长期记忆（RAG）：可选，任务开始时自动索引并召回相关代码
     memory = MemoryStore(cfg.workdir, cfg.embed_model) if memory_enabled else None
