@@ -34,6 +34,7 @@ class Config:
     workdir: Path = field(default_factory=Path.cwd)
     sandbox_mode: str = "host"  # host | docker
     docker_image: str = "python:3.12-slim"
+    embed_model: str = "BAAI/bge-small-en-v1.5"  # RAG 本地 embedding 模型
 
     @classmethod
     def from_env(cls, workdir: Path | None = None) -> "Config":
@@ -53,4 +54,5 @@ class Config:
             workdir=workdir or Path.cwd(),
             sandbox_mode=os.environ.get("AGENT_SANDBOX", "host"),
             docker_image=os.environ.get("DOCKER_IMAGE", "python:3.12-slim"),
+            embed_model=os.environ.get("EMBED_MODEL", "BAAI/bge-small-en-v1.5"),
         )

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from agent.context import ContextManager
 from agent.llm import LLMClient
+from agent.memory import MemoryStore
 from agent.planner import Planner
 from agent.tools import ToolRegistry
 from agent.trace import Tracer
@@ -33,6 +34,13 @@ def _assistant_message(msg) -> dict:
             for tc in msg.tool_calls
         ]
     return m
+
+
+def _format_relevant(chunks: list[dict]) -> str:
+    lines = ["以下是工作目录中与任务最相关的代码片段（RAG 召回）："]
+    for c in chunks:
+        lines.append(f"\n### {c['path']}:{c['start_line']}-{c['end_line']} (score={c['score']:.3f})\n{c['text']}")
+    return "\n".join(lines)
 
 
 @dataclass
@@ -67,6 +75,7 @@ class AgentLoop:
         planner: Planner | None = None,
         verifier: Verifier | None = None,
         max_verify_attempts: int = 3,
+        memory: MemoryStore | None = None,
     ):
         self.llm = llm
         self.registry = registry
@@ -78,12 +87,22 @@ class AgentLoop:
         self.planner = planner
         self.verifier = verifier
         self.max_verify_attempts = max_verify_attempts
+        self.memory = memory
 
     def run(self, task: str) -> RunOutcome:
         ctx = ContextManager(SYSTEM_PROMPT, self.token_budget, self.llm, self.keep_recent)
         ctx.add({"role": "user", "content": task})
         if self.tracer:
             self.tracer.start(task)
+
+        # RAG：任务开始时自动索引工作目录，并召回最相关的代码片段注入上下文。
+        if self.memory is not None:
+            self.memory.index()
+            relevant = self.memory.search(task, k=4)
+            if relevant:
+                ctx.add({"role": "user", "content": _format_relevant(relevant)})
+                if self.tracer:
+                    self.tracer.memory(len(relevant))
 
         # Plan-then-execute: produce a short plan before acting.
         if self.planner is not None:

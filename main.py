@@ -6,10 +6,12 @@ from pathlib import Path
 from agent.config import Config
 from agent.llm import LLMClient
 from agent.loop import AgentLoop
+from agent.memory import MemoryStore
 from agent.planner import Planner
 from agent.safety import SafetyPolicy
 from agent.sandbox import create_sandbox
 from agent.tools import ToolRegistry
+from agent.tools.code import SearchCodeTool
 from agent.tools.fs import EditFileTool, ListFilesTool, ReadFileTool, SearchTool, WriteFileTool
 from agent.tools.shell import CheckCommandTool, RunCommandTool, StartCommandTool, StopCommandTool
 from agent.trace import Tracer
@@ -28,6 +30,7 @@ def build_agent(
     tracer=None,
     plan: bool = True,
     verify: bool = True,
+    memory_enabled: bool = True,
 ) -> AgentLoop:
     """Assemble the agent from its parts (tools + safety + llm + loop + planner/verifier)."""
     # A SafetyPolicy gates destructive commands: confirmed interactively, or
@@ -48,6 +51,11 @@ def build_agent(
     registry.register(CheckCommandTool(sandbox))
     registry.register(StopCommandTool(sandbox))
 
+    # 长期记忆（RAG）：可选，任务开始时自动索引并召回相关代码
+    memory = MemoryStore(cfg.workdir, cfg.embed_model) if memory_enabled else None
+    if memory is not None:
+        registry.register(SearchCodeTool(memory))
+
     llm = LLMClient(cfg.api_key, cfg.base_url, cfg.model, cfg.temperature, cfg.max_retries)
     planner = Planner(llm) if plan else None
     verifier = Verifier(cfg.workdir) if verify else None
@@ -59,6 +67,7 @@ def build_agent(
         tracer=tracer,
         planner=planner,
         verifier=verifier,
+        memory=memory,
     )
     agent.sandbox = sandbox  # 供 main() 清理（如删除 Docker 容器）
     return agent
@@ -71,6 +80,7 @@ def main() -> None:
     parser.add_argument("--allow-dangerous", action="store_true", help="关闭危险命令拦截")
     parser.add_argument("--no-plan", action="store_true", help="关闭计划阶段")
     parser.add_argument("--no-verify", action="store_true", help="关闭完成前验证")
+    parser.add_argument("--no-memory", action="store_true", help="关闭 RAG 长期记忆")
     parser.add_argument("--trace", default=None, help="把完整轨迹写入 JSONL 文件（可回放）")
     args = parser.parse_args()
 
@@ -84,6 +94,7 @@ def main() -> None:
         tracer=tracer,
         plan=not args.no_plan,
         verify=not args.no_verify,
+        memory_enabled=not args.no_memory,
     )
 
     try:
